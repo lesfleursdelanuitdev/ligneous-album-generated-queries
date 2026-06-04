@@ -8,6 +8,8 @@ import { buildFamilyMediaTitle } from "./family-photo-title";
 export type GeneratedAlbumCollectResult = {
   title: string;
   mediaIds: string[];
+  /** Explicit profile/cover GedcomMedia id for individual/family/event sources, when set. */
+  preferredCoverMediaId: string | null;
 };
 
 function mergeMediaIds(...groups: string[][]): string[] {
@@ -42,11 +44,22 @@ export async function collectMediaIdsForGenerated(
         select: { fullName: true },
       });
       const name = stripSlashesFromName(ind?.fullName) || "Unknown";
-      const links = await prisma.gedcomIndividualMedia.findMany({
-        where: { individualId: source.individualId, fileUuid },
-        select: { mediaId: true },
-      });
-      return { title: `Media for ${name}`, mediaIds: links.map((l) => l.mediaId) };
+      const [links, profile] = await Promise.all([
+        prisma.gedcomIndividualMedia.findMany({
+          where: { individualId: source.individualId, fileUuid },
+          select: { mediaId: true },
+        }),
+        prisma.gedcomIndividualProfileMedia.findUnique({
+          where: { individualId: source.individualId },
+          select: { mediaId: true },
+        }),
+      ]);
+      const preferredCoverMediaId = profile?.mediaId ?? null;
+      const mediaIds = mergeMediaIds(
+        preferredCoverMediaId ? [preferredCoverMediaId] : [],
+        links.map((l) => l.mediaId),
+      );
+      return { title: `Media for ${name}`, mediaIds, preferredCoverMediaId };
     }
     case "family": {
       const fam = await prisma.gedcomFamily.findFirst({
@@ -62,11 +75,22 @@ export async function collectMediaIdsForGenerated(
         wifeFullName: fam?.wife?.fullName,
         familyXref: fam?.xref ?? null,
       });
-      const links = await prisma.gedcomFamilyMedia.findMany({
-        where: { familyId: source.familyId, fileUuid },
-        select: { mediaId: true },
-      });
-      return { title, mediaIds: links.map((l) => l.mediaId) };
+      const [links, profile] = await Promise.all([
+        prisma.gedcomFamilyMedia.findMany({
+          where: { familyId: source.familyId, fileUuid },
+          select: { mediaId: true },
+        }),
+        prisma.gedcomFamilyProfileMedia.findUnique({
+          where: { familyId: source.familyId },
+          select: { mediaId: true },
+        }),
+      ]);
+      const preferredCoverMediaId = profile?.mediaId ?? null;
+      const mediaIds = mergeMediaIds(
+        preferredCoverMediaId ? [preferredCoverMediaId] : [],
+        links.map((l) => l.mediaId),
+      );
+      return { title, mediaIds, preferredCoverMediaId };
     }
     case "event": {
       const ev = await prisma.gedcomEvent.findFirst({
@@ -112,11 +136,22 @@ export async function collectMediaIdsForGenerated(
         familyPair,
         individualName,
       });
-      const links = await prisma.gedcomEventMedia.findMany({
-        where: { eventId: source.eventId, fileUuid },
-        select: { mediaId: true },
-      });
-      return { title, mediaIds: links.map((l) => l.mediaId) };
+      const [links, profile] = await Promise.all([
+        prisma.gedcomEventMedia.findMany({
+          where: { eventId: source.eventId, fileUuid },
+          select: { mediaId: true },
+        }),
+        prisma.gedcomEventProfileMedia.findUnique({
+          where: { eventId: source.eventId },
+          select: { mediaId: true },
+        }),
+      ]);
+      const preferredCoverMediaId = profile?.mediaId ?? null;
+      const mediaIds = mergeMediaIds(
+        preferredCoverMediaId ? [preferredCoverMediaId] : [],
+        links.map((l) => l.mediaId),
+      );
+      return { title, mediaIds, preferredCoverMediaId };
     }
     case "place": {
       const pl = await prisma.gedcomPlace.findFirst({
@@ -145,7 +180,7 @@ export async function collectMediaIdsForGenerated(
         fromEvents.map((r) => r.mediaId),
         fromDirect.map((r) => r.mediaId),
       );
-      return { title: `Media from ${placeLabel}`, mediaIds };
+      return { title: `Media from ${placeLabel}`, mediaIds, preferredCoverMediaId: null };
     }
     case "date": {
       const d = await prisma.gedcomDate.findFirst({
@@ -191,16 +226,31 @@ export async function collectMediaIdsForGenerated(
         endMonth: d?.endMonth,
         endDay: d?.endDay,
       });
-      return { title, mediaIds };
+      return { title, mediaIds, preferredCoverMediaId: null };
     }
     case "tag": {
       const tag = await prisma.tag.findFirst({ where: { id: source.tagId }, select: { name: true } });
       const label = tag?.name?.trim() || "tag";
-      const links = await prisma.gedcomMediaAppTag.findMany({
-        where: { tagId: source.tagId },
-        select: { gedcomMediaId: true },
-      });
-      return { title: `Media tagged ${doubleQuotedLabel(label)}`, mediaIds: links.map((l) => l.gedcomMediaId) };
+      const [links, profile] = await Promise.all([
+        prisma.gedcomMediaAppTag.findMany({
+          where: { tagId: source.tagId, gedcomMedia: { fileUuid } },
+          select: { gedcomMediaId: true },
+        }),
+        prisma.tagProfileMedia.findUnique({
+          where: { tagId_fileUuid: { tagId: source.tagId, fileUuid } },
+          select: { mediaId: true },
+        }),
+      ]);
+      const preferredCoverMediaId = profile?.mediaId ?? null;
+      const mediaIds = mergeMediaIds(
+        preferredCoverMediaId ? [preferredCoverMediaId] : [],
+        links.map((l) => l.gedcomMediaId),
+      );
+      return {
+        title: `Media tagged ${doubleQuotedLabel(label)}`,
+        mediaIds,
+        preferredCoverMediaId,
+      };
     }
     case "note": {
       const note = await prisma.gedcomNote.findFirst({
@@ -262,10 +312,10 @@ export async function collectMediaIdsForGenerated(
       for (const rows of mediaIdSets) {
         for (const row of rows) idSet.add(row.mediaId);
       }
-      return { title, mediaIds: [...idSet] };
+      return { title, mediaIds: [...idSet], preferredCoverMediaId: null };
     }
     default: {
-      return { title: "Media", mediaIds: [] };
+      return { title: "Media", mediaIds: [], preferredCoverMediaId: null };
     }
   }
 }
