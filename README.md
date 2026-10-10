@@ -2,6 +2,8 @@
 
 Prisma queries that work out which photos and documents belong to a generated album in a genealogy tree, and what that album should be called.
 
+**Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 A generated album is not stored anywhere. It is defined by a record in the tree: "Media for Maria Silva", "Media from the marriage of João Silva and Ana Costa", "Media from Lisbon", "Media tagged “Weddings”". This package takes that definition, follows the GEDCOM links in Postgres, and returns the media ids, a readable title and the preferred cover image. The admin app and the public site both call it, so an album has the same contents and title in both places.
 
 ## What it does
