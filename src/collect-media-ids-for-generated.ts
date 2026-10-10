@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@ligneous/prisma";
 import type { AlbumViewSource } from "@ligneous/album-view";
+import { fullPlaceLabel, resolveEventPrimaryParticipants } from "@ligneous/gedcom-events";
 import { stripSlashesFromName } from "./gedcom-mini";
 import { buildDateMediaTitle } from "./date-photo-title";
 import { buildEventMediaTitle, familyPairLabel, individualLabel } from "./event-photo-title";
@@ -103,32 +104,41 @@ export async function collectMediaIdsForGenerated(
             select: {
               family: {
                 select: {
-                  husband: { select: { fullName: true, xref: true } },
-                  wife: { select: { fullName: true, xref: true } },
+                  id: true,
+                  husband: { select: { id: true, fullName: true, xref: true } },
+                  wife: { select: { id: true, fullName: true, xref: true } },
                 },
               },
             },
           },
           individualEvents: {
-            take: 1,
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
             select: {
-              individual: { select: { fullName: true, xref: true } },
+              participantKind: true,
+              role: true,
+              sortOrder: true,
+              individual: { select: { id: true, fullName: true, xref: true } },
             },
           },
         },
       });
+      const resolved = resolveEventPrimaryParticipants({
+        individualEvents: ev?.individualEvents ?? [],
+        familyEvents: ev?.familyEvents ?? [],
+      });
       const fam = ev?.familyEvents?.[0]?.family;
-      const familyPair = fam
-        ? familyPairLabel({
-            husbandFullName: fam.husband?.fullName,
-            wifeFullName: fam.wife?.fullName,
-            husbandXref: fam.husband?.xref ?? null,
-            wifeXref: fam.wife?.xref ?? null,
-          })
-        : null;
-      const ind = ev?.individualEvents?.[0]?.individual;
-      const individualName = ind
-        ? individualLabel(ind.fullName, ind.xref ?? null)
+      const familyPair =
+        resolved.source === "family-partners" && fam
+          ? familyPairLabel({
+              husbandFullName: fam.husband?.fullName,
+              wifeFullName: fam.wife?.fullName,
+              husbandXref: fam.husband?.xref ?? null,
+              wifeXref: fam.wife?.xref ?? null,
+            })
+          : null;
+      const primary = resolved.individuals[0];
+      const individualName = primary
+        ? individualLabel(primary.fullName ?? null, primary.xref ?? null)
         : null;
       const title = buildEventMediaTitle({
         eventType: ev?.eventType ?? "EVEN",
@@ -156,9 +166,17 @@ export async function collectMediaIdsForGenerated(
     case "place": {
       const pl = await prisma.gedcomPlace.findFirst({
         where: { id: source.placeId, fileUuid },
-        select: { name: true, original: true },
+        select: {
+          name: true,
+          original: true,
+          county: true,
+          state: true,
+          country: true,
+          resolvedLink: { select: { resolvedPlace: { select: { displayName: true, status: true } } } },
+        },
       });
-      const placeLabel = (pl?.name ?? pl?.original ?? "this place").trim() || "this place";
+      // Full place name, never a single segment — see the "Full place names" rule in CLAUDE.md.
+      const placeLabel = fullPlaceLabel(pl)?.trim() || "this place";
 
       const eventsHere = await prisma.gedcomEvent.findMany({
         where: { fileUuid, placeId: source.placeId },

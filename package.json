@@ -9,6 +9,7 @@
   "sideEffects": false,
   "dependencies": {
     "@ligneous/album-view": "file:../ligneous-album-view",
+    "@ligneous/gedcom-events": "file:../ligneous-gedcom-events",
     "@ligneous/prisma": "file:../ligneous-prisma"
   }
 }
